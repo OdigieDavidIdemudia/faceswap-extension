@@ -1,0 +1,10 @@
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+python-multipart>=0.0.9
+pillow>=10.0.0
+insightface>=0.7.3
+opencv-python>=4.8.0
+onnxruntime>=1.16.0
+numpy>=1.24.0
+requests>=2.31.0
+pyvirtualcam>=0.11.1

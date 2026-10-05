@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FaceSwap Web - Mobile UI</title>
+    <link rel="stylesheet" href="../extension/styles.css">
+    <style>
+        body { padding: 20px; max-width: 600px; margin: auto; }
+        .mobile-header { text-align: center; margin-bottom: 20px; }
+        #camera-video { width: 100%; border-radius: 12px; transform: scaleX(-1); }
+        .card { margin-bottom: 20px; padding: 15px; background: #1e1e2e; border-radius: 15px; color: #fff; }
+        .hidden { display: none; }
+        #camera-canvas { width: 100%; border-radius: 12px; }
+    </style>
+</head>
+<body class="dark-mode">
+    <div class="mobile-header">
+        <h1>FaceSwap Mobile</h1>
+        <div id="server-status" class="status-dot status-offline"></div>
+    </div>
+
+    <div class="card" style="padding: 10px; margin-bottom: 12px; border: 1px solid rgba(255,255,255,0.1);">
+      <div style="display: flex; gap: 8px;">
+        <input type="text" id="api-url-input" placeholder="Server URL (e.g., http://192.168.88.27:8000)" style="flex: 1; background: #000; color: #fff; border: 1px solid #333; padding: 8px; border-radius: 6px; font-size: 13px;">
+        <button id="save-url-btn" style="background: #4f46e5; color: white; border: none; padding: 8px 15px; border-radius: 6px; font-size: 13px;">Use</button>
+      </div>
+    </div>
+
+    <div class="card">
+        <h3>Step 1: Upload Source Face</h3>
+        <input type="file" id="source-input" accept="image/*">
+        <div id="source-preview-wrap">
+            <img id="source-preview" class="hidden" style="width: 100px; margin-top: 10px;">
+        </div>
+        <div style="margin-top: 15px; display: flex; align-items: center; gap: 8px; font-weight: bold; background: rgba(255,255,255,0.05); padding: 10px; border-radius: 8px;">
+            <label for="vcam-toggle" style="cursor: pointer;">Output to Virtual Camera (PC):</label>
+            <input type="checkbox" id="vcam-toggle" style="transform: scale(1.5); margin-left: 5px;">
+        </div>
+    </div>
+
+    <div class="card">
+        <h3>Step 2: Live Camera</h3>
+        <div id="camera-container">
+            <video id="camera-video" autoplay playsinline muted></video>
+            <canvas id="camera-canvas" class="hidden"></canvas>
+        </div>
+        <button id="start-btn" style="width: 100%; margin-top: 10px; padding: 12px; background: #6366f1; border: none; border-radius: 8px; color: white;">Start Swap</button>
+        <button id="stop-btn" class="hidden" style="width: 100%; margin-top: 10px; padding: 12px; background: #ef4444; border: none; border-radius: 8px; color: white;">Stop</button>
+        <div id="camera-stats" style="margin-top: 10px; font-size: 0.8em; opacity: 0.7;">Ready</div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

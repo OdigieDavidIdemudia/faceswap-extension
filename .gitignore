@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+*.egg
+.env
+.venv
+venv/
+env/
+
+# Temp files
+tmp/
+*.tmp
+
+# Roop model weights (large binary files)
+roop/models/*.onnx
+roop/models/*.pth
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# --- safety block ---
+__pycache__/
+*.pyc
+venv/
+.venv/
+*.egg-info/
+node_modules/
+build/
+dist/
+.vercel/
+.netlify/
+.env
+.env.local
+*.log
+tmp/
+*.zip
+*.exe
+*.pth
+.license.key
+*.db
+
