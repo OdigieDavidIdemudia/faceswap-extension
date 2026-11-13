@@ -38,8 +38,36 @@ sys.path.append(str(ROOP_DIR))
 import roop.globals
 import roop.processors.frame.face_swapper
 import roop.processors.frame.face_enhancer
-from roop.face_analyser import get_one_face
+from roop.face_analyser import get_many_faces
 from roop.utilities import resolve_relative_path
+
+# ---------------------------------------------------------------------------
+# Face selection helpers
+# ---------------------------------------------------------------------------
+# InsightFace returns detections in score order, not size order, so faces[0]
+# can be a small background face. Always pick the main (largest) subject.
+MIN_FACE_WIDTH = 40          # ignore background faces smaller than this
+SMALL_FACE_TARGET = 220      # upscale targets whose main face is narrower than this
+MAX_UPSCALE = 2.0
+
+
+def _sorted_faces(frame):
+    faces = get_many_faces(frame) or []
+    return sorted(
+        faces,
+        key=lambda f: (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]),
+        reverse=True,
+    )
+
+
+def _main_face(frame):
+    faces = _sorted_faces(frame)
+    return faces[0] if faces else None
+
+
+def _usable_faces(frame, min_width=MIN_FACE_WIDTH):
+    return [f for f in _sorted_faces(frame) if (f.bbox[2] - f.bbox[0]) >= min_width]
+
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -230,10 +258,10 @@ async def set_source(source_face: UploadFile = File(...)):
         nparr = np.frombuffer(contents, np.uint8)
         img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         
-        face = get_one_face(img)
+        face = _main_face(img)
         if face:
             CURRENT_SOURCE_FACE = face
-            logger.info("New source face registered for live swap.")
+            logger.info("New source face registered for live swap (width=%d).", int(face.bbox[2] - face.bbox[0]))
             return {"status": "success", "message": "Source face registered."}
         else:
             raise HTTPException(status_code=400, detail="No face detected in the source image.")
@@ -303,9 +331,12 @@ async def websocket_endpoint(websocket: WebSocket):
         
         # 3. Heavy Swapping (In Thread)
         def run_swap():
-            roop.globals.many_faces = True 
+            roop.globals.many_faces = True
             f = frame.copy()
-            target_faces = roop.processors.frame.face_swapper.get_many_faces(f)
+            target_faces = [
+                face for face in _sorted_faces(f)
+                if (face.bbox[2] - face.bbox[0]) >= MIN_FACE_WIDTH
+            ]
             if target_faces:
                 for idx, target_face in enumerate(target_faces):
                     if CURRENT_FACE_INDEX == -1 or CURRENT_FACE_INDEX == idx:
@@ -417,46 +448,102 @@ async def websocket_endpoint(websocket: WebSocket):
 async def swap_face(
     source_face: UploadFile = File(...),
     target_image: UploadFile = File(...),
+    all_faces: bool = False,
 ):
-    """Refactored legacy endpoint using the library directly for speed."""
+    """Swap the main face (or every usable face) from source onto the target image."""
     try:
         # Load source
         source_bytes = await source_face.read()
         source_img = cv2.imdecode(np.frombuffer(source_bytes, np.uint8), cv2.IMREAD_COLOR)
-        source_face_obj = get_one_face(source_img)
-        
+        if source_img is None:
+            raise HTTPException(status_code=400, detail="Source image could not be decoded.")
+
+        # Use the LARGEST source face; faces[0] may be a background bystander.
+        source_face_obj = _main_face(source_img)
         if not source_face_obj:
             raise HTTPException(status_code=400, detail="No face detected in source image.")
-            
+        source_width = source_face_obj.bbox[2] - source_face_obj.bbox[0]
+        if source_width < 60:
+            raise HTTPException(
+                status_code=400,
+                detail=f"The source face is too small ({int(source_width)}px). Use a closer, higher-resolution photo.",
+            )
+
         # Load target
         target_bytes = await target_image.read()
         target_img = cv2.imdecode(np.frombuffer(target_bytes, np.uint8), cv2.IMREAD_COLOR)
-        
-        # Process
+        if target_img is None:
+            raise HTTPException(status_code=400, detail="Target image could not be decoded.")
+        original = target_img.copy()
+
+        detected = _sorted_faces(target_img)
+        usable = [f for f in detected if (f.bbox[2] - f.bbox[0]) >= MIN_FACE_WIDTH]
+        if not usable:
+            raise HTTPException(
+                status_code=422,
+                detail="No usable face found in the target image (faces must be at least 40px wide). Use a closer crop or a higher-resolution image.",
+            )
+
+        # Small faces swap badly: upscale the target, swap, then scale back down.
+        scale = 1.0
+        largest_width = usable[0].bbox[2] - usable[0].bbox[0]
+        if largest_width < SMALL_FACE_TARGET:
+            proposed = min(MAX_UPSCALE, SMALL_FACE_TARGET / max(largest_width, 1))
+            if proposed > 1.05:
+                bigger = cv2.resize(
+                    target_img, None, fx=proposed, fy=proposed, interpolation=cv2.INTER_LANCZOS4
+                )
+                bigger_detected = _sorted_faces(bigger)
+                bigger_usable = [
+                    f for f in bigger_detected if (f.bbox[2] - f.bbox[0]) >= MIN_FACE_WIDTH
+                ]
+                if bigger_usable:
+                    target_img = bigger
+                    detected = bigger_detected
+                    usable = bigger_usable
+                    scale = proposed
+                    logger.info(
+                        "Upscaled target %.2fx for a %dpx face", scale, int(largest_width)
+                    )
+
+        # Process (largest face by default, every usable face when requested)
         roop.globals.many_faces = True
-        target_faces = roop.processors.frame.face_swapper.get_many_faces(target_img)
-        
-        if target_faces:
-            for target_face in target_faces:
-                target_img = roop.processors.frame.face_swapper.swap_face(
-                    source_face_obj,
-                    target_face,
-                    target_img
-                )
-                target_img = roop.processors.frame.face_enhancer.enhance_face(
-                    target_face,
-                    target_img
-                )
-        
+        swap_list = usable if all_faces else usable[:1]
+        for target_face in swap_list:
+            target_img = roop.processors.frame.face_swapper.swap_face(
+                source_face_obj,
+                target_face,
+                target_img
+            )
+            target_img = roop.processors.frame.face_enhancer.enhance_face(
+                target_face,
+                target_img
+            )
+
+        if scale > 1.0:
+            h, w = original.shape[:2]
+            target_img = cv2.resize(target_img, (w, h), interpolation=cv2.INTER_AREA)
+
         # Save to temp and return
         job_id = uuid.uuid4().hex
         output_path = TMP_DIR / f"{job_id}_out.png"
         cv2.imwrite(str(output_path), target_img)
-        
+
+        logger.info(
+            "Swapped %d/%d face(s) (source %dpx, upscale %.2fx)",
+            len(swap_list), len(detected), int(source_width), scale,
+        )
+
         return FileResponse(
             path=str(output_path),
             media_type="image/png",
             filename="swapped.png",
+            headers={
+                "X-Faces-Detected": str(len(detected)),
+                "X-Faces-Swapped": str(len(swap_list)),
+                "X-Source-Face-Width": str(int(source_width)),
+                "X-Upscale": f"{scale:.2f}",
+            },
         )
         
     except HTTPException:
